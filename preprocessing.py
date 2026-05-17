@@ -70,4 +70,5 @@ np.save('y_val.npy',   y_val)
 np.save('y_test.npy',  y_test)
 
 joblib.dump(scaler, 'scaler.pkl')
+joblib.dump(selector, 'variance_selector.pkl')
 joblib.dump(l_encoder, 'label_encoder.pkl')
