@@ -72,7 +72,7 @@ class MLP(nn.Module):
         return self.network(x)
     
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
-# print(f"Using device: {device}") 
+# print(f"Using device: {device}")
 
 model = MLP(input_size, num_classes).to(device)
 loss_function = nn.CrossEntropyLoss()  # standard loss function for multi class classifincation 
