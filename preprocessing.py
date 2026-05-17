@@ -3,6 +3,7 @@ import pandas as pd
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.model_selection import train_test_split
+import joblib
 
 features = pd.read_csv("data.csv", index_col=0)
 labels = pd.read_csv("labels.csv", index_col=0).squeeze()
@@ -67,3 +68,6 @@ np.save('X_test.npy',  X_test_scaled)
 np.save('y_train.npy', y_train)
 np.save('y_val.npy',   y_val)
 np.save('y_test.npy',  y_test)
+
+joblib.dump(scaler, 'scaler.pkl')
+joblib.dump(l_encoder, 'label_encoder.pkl')
