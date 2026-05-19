@@ -172,7 +172,7 @@ def plot_curves(history, title, filename):
 
     plt.tight_layout()
     plt.savefig(filename, dpi=150)
-    # plt.show()
+    plt.show()
 
 
 model = Autoencoder(INPUT_SIZE, LATENT_DIM, NUM_CLASSES).to(DEVICE)
@@ -308,7 +308,7 @@ plt.xlabel('Predicted'); plt.ylabel('Actual')
 plt.title('Frozen encoder — confusion matrix')
 plt.tight_layout()
 plt.savefig('frozen_confusion.png', dpi=150)
-#plt.show()
+plt.show()
 
 print(f"\nMacro F1: {f1_score(y_test, preds, average='macro'):.4f}")
 print(classification_report(y_test, preds, target_names=l_encoder.classes_))
@@ -387,7 +387,7 @@ plt.xlabel('Predicted'); plt.ylabel('Actual')
 plt.title('Train encoder + classifier — confusion matrix')
 plt.tight_layout()
 plt.savefig('encoder_classifier_confusion.png', dpi=150)
-#plt.show()
+plt.show()
 
 print(f"\nMacro F1: {f1_score(y_test, preds, average='macro'):.4f}")
 print(classification_report(y_test, preds, target_names=l_encoder.classes_))
