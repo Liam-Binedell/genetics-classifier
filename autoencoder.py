@@ -159,20 +159,20 @@ def plot_curves(history, title, filename):
     axes[0].plot(history['val_mse'],   label='Val MSE')
     axes[0].set_title(f'{title} — Reconstruction loss')
     axes[0].set_xlabel('Epoch'); axes[0].legend()
- 
+
     axes[1].plot(history['train_ce'], label='Train CE')
     axes[1].plot(history['val_ce'],   label='Val CE')
     axes[1].set_title(f'{title} — Classification loss')
     axes[1].set_xlabel('Epoch'); axes[1].legend()
- 
+
     axes[2].plot(history['train_acc'], label='Train Acc')
     axes[2].plot(history['val_acc'],   label='Val Acc')
     axes[2].set_title(f'{title} — Accuracy')
     axes[2].set_xlabel('Epoch'); axes[2].legend()
- 
+
     plt.tight_layout()
     plt.savefig(filename, dpi=150)
-    plt.show()
+    # plt.show()
 
 
 model = Autoencoder(INPUT_SIZE, LATENT_DIM, NUM_CLASSES).to(DEVICE)
@@ -230,7 +230,7 @@ for epoch in range(NUM_EPOCHS):
 plot_curves(history_pretrain, 'Pretrain', 'pretrain_curves.png')
 torch.save(model.state_dict(), 'ae_pretrained.pth')
 
-print("\n── Regime 2: frozen encoder ─────────────────────────────────")
+print("\n── Regime 1: frozen encoder ─────────────────────────────────")
 
 model_frozen = Autoencoder(INPUT_SIZE, LATENT_DIM, NUM_CLASSES).to(DEVICE)
 model_frozen.load_state_dict(torch.load('ae_pretrained.pth'))
@@ -269,7 +269,7 @@ for epoch in range(NUM_EPOCHS):
         train_correct += (logits.argmax(1) == y_batch).sum().item()
         n_batches     += 1
 
-    val_mse, val_ce, val_acc = evaluate(model_frozen, val_loader, mse_loss, ce_loss, lam=0, device=DEVICE, noisy=True)
+    val_mse, val_ce, val_acc = evaluate(model_frozen, val_loader, mse_loss, ce_loss, lam=0, device=DEVICE, noisy=False)
     t_mse = train_mse / n_batches
     t_ce  = train_ce  / n_batches
     t_acc = train_correct / len(train_loader.dataset)
@@ -308,8 +308,87 @@ plt.xlabel('Predicted'); plt.ylabel('Actual')
 plt.title('Frozen encoder — confusion matrix')
 plt.tight_layout()
 plt.savefig('frozen_confusion.png', dpi=150)
-plt.show()
+#plt.show()
 
 print(f"\nMacro F1: {f1_score(y_test, preds, average='macro'):.4f}")
 print(classification_report(y_test, preds, target_names=l_encoder.classes_))
 torch.save(model_frozen.state_dict(), 'ae_frozen.pth')
+
+print("\n── Regime 2: encoder + classifier ─────────────────────────────────")
+
+model = Autoencoder(INPUT_SIZE, LATENT_DIM, NUM_CLASSES).to(DEVICE)
+
+optimiser = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimiser, patience=5, factor=0.5)
+stopper   = EarlyStopping(patience=15)
+
+history = {k: [] for k in ['train_mse', 'val_mse', 'train_ce', 'val_ce', 'train_acc', 'val_acc']}
+
+LAMBDA = 0.5
+for epoch in range(NUM_EPOCHS):
+    model.train()
+    train_mse, train_ce, train_correct = 0.0, 0.0, 0
+    n_batches = 0
+
+    for X_batch, y_batch in train_loader:
+        X_batch, y_batch = X_batch.to(DEVICE), y_batch.to(DEVICE)
+
+        X_noisy = add_noise(X_batch)
+        recon, logits = model(X_noisy)
+        mse = mse_loss(recon, X_batch)
+        ce = ce_loss(logits, y_batch)
+        loss = mse + LAMBDA * ce
+
+        optimiser.zero_grad()
+        loss.backward()
+        optimiser.step()
+
+        train_mse     += mse_loss(recon, X_batch).item()
+        train_ce      += ce.item()
+        train_correct += (logits.argmax(1) == y_batch).sum().item()
+        n_batches     += 1
+
+    val_mse, val_ce, val_acc = evaluate(model, val_loader, mse_loss, ce_loss, lam=0, device=DEVICE, noisy=True)
+    t_mse = train_mse / n_batches
+    t_ce  = train_ce  / n_batches
+    t_acc = train_correct / len(train_loader.dataset)
+
+    history['train_mse'].append(t_mse)
+    history['val_mse'].append(val_mse)
+    history['train_ce'].append(t_ce)
+    history['val_ce'].append(val_ce)
+    history['train_acc'].append(t_acc)
+    history['val_acc'].append(val_acc)
+
+    scheduler.step(val_mse + LAMBDA * val_ce)
+
+    if (epoch + 1) % 10 == 0:
+        print(f"Epoch {epoch+1:3d} | Train CE: {t_ce:.4f} | Val CE: {val_ce:.4f} | Val Acc: {val_acc:.4f}")
+
+    if stopper.step(val_ce, model):
+        print(f"\nEarly stop at epoch {epoch+1}")
+        stopper.restore(model)
+        break
+
+plot_curves(history, 'Train E+C', 'encoder_classifier.png')
+
+# confusion matrix + report
+model.eval()
+with torch.no_grad():
+    _, logits = model(X_test_t.to(DEVICE))
+    preds = logits.argmax(1).cpu().numpy()
+
+cm = confusion_matrix(y_test, preds)
+plt.figure(figsize=(7, 5))
+sns.heatmap(cm, annot=True, fmt='d',
+            xticklabels=l_encoder.classes_,
+            yticklabels=l_encoder.classes_, cmap='BuPu')
+plt.xlabel('Predicted'); plt.ylabel('Actual')
+plt.title('Train encoder + classifier — confusion matrix')
+plt.tight_layout()
+plt.savefig('encoder_classifier_confusion.png', dpi=150)
+#plt.show()
+
+print(f"\nMacro F1: {f1_score(y_test, preds, average='macro'):.4f}")
+print(classification_report(y_test, preds, target_names=l_encoder.classes_))
+torch.save(model.state_dict(), 'ae_classifier.pth')

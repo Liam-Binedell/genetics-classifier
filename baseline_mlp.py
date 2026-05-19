@@ -70,6 +70,17 @@ class MLP(nn.Module):
     
     def forward(self, x):
         return self.network(x)
+
+class LinearRegression(nn.Module):
+    def __init__(self, input_size, num_classes):
+        super().__init__()
+
+        self.net = nn.Sequential(
+            nn.Linear(input_size, num_classes),
+        )
+
+    def forward(self, x):
+        return self.net(x)
     
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # print(f"Using device: {device}")
@@ -210,3 +221,140 @@ plt.savefig('mlp_confusion_matrix.png', dpi=150)
 plt.show()
 
 torch.save(model.state_dict(), 'mlp_baseline.pth')
+
+print("Emulation of logistic regression\n")
+
+model = LinearRegression(input_size, num_classes).to(device)
+loss_function = nn.CrossEntropyLoss()  # standard loss function for multi class classifincation 
+optimiser = optim.Adam(model.parameters(), lr=1e-3) # most widely used optimiser for nn's 
+
+num_epochs = 100
+train_losses, val_losses = [], []
+train_accuracies, val_accuracies = [], []
+
+#The data reaches 100% validation accuracy really fast...so adding early stopping, called patience-based early stopping. 
+patience = 10 # no improvement for 10 consecutive epochs 
+min_delta = 1e-4 # stop early if validation loss failed to improve by at least min_delta = 1e-4 for 10 consecutive epochs.
+best_val_loss = float('inf')
+epochs_without_improvement = 0
+best_model_state = None
+
+for epoch in range(num_epochs):
+    # Training phase
+    model.train()  # activates dropout 
+    train_loss, train_correct = 0, 0
+    
+    for X_batch, y_batch in train_loader:
+        X_batch = X_batch.to(device)
+        y_batch = y_batch.to(device)
+        
+        #forward pass 
+        predictions = model(X_batch)
+        loss = loss_function(predictions, y_batch)
+        
+        #backward pass 
+        optimiser.zero_grad()  #clear gradients from last step
+        loss.backward() #compute gradients
+        optimiser.step() #update weights
+        
+        train_loss += loss.item()
+        train_correct += (predictions.argmax(1) == y_batch).sum().item()
+    
+    # Validation 
+    model.eval()  # disables dropout 
+    val_loss, val_correct = 0, 0
+    
+    with torch.no_grad():  
+        for X_batch, y_batch in val_loader:
+            X_batch = X_batch.to(device)
+            y_batch = y_batch.to(device)
+            
+            predictions = model(X_batch)
+            loss = loss_function(predictions, y_batch)
+            
+            val_loss += loss.item()
+            val_correct += (predictions.argmax(1) == y_batch).sum().item()
+    
+    # Record metrics 
+    avg_train_loss = train_loss/len(train_loader)
+    avg_val_loss = val_loss/len(val_loader)
+    train_acc = train_correct/len(X_train)
+    val_acc = val_correct/len(X_val)
+    
+    train_losses.append(avg_train_loss)
+    val_losses.append(avg_val_loss)
+    train_accuracies.append(train_acc)
+    val_accuracies.append(val_acc)
+    
+    if (epoch+1)%10 == 0:
+        print(f"Epoch [{epoch+1}/{num_epochs}] "
+              f"Train Loss: {avg_train_loss:.4f} | Train Acc: {train_acc:.4f} | "
+              f"Val Loss: {avg_val_loss:.4f} | Val Acc: {val_acc:.4f}")
+        
+    #early stopping stuff 
+    if avg_val_loss<best_val_loss - min_delta:
+        best_val_loss = avg_val_loss
+        epochs_without_improvement = 0
+        best_model_state = copy.deepcopy(model.state_dict()) 
+    else:
+        epochs_without_improvement += 1
+
+    if epochs_without_improvement >= patience:
+        print(f"\nEarly stopping at epoch {epoch + 1} "
+              f"(no val loss improvement for {patience} epochs)")
+        model.load_state_dict(best_model_state) 
+        break
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+
+# Loss curves
+ax1.plot(train_losses, label='Train Loss')
+ax1.plot(val_losses, label='Val Loss')
+ax1.set_xlabel('Epoch')
+ax1.set_ylabel('Loss')
+ax1.set_title('LR Training and Validation Loss')
+ax1.legend()
+
+# Accuracy curves
+ax2.plot(train_accuracies, label='Train Accuracy')
+ax2.plot(val_accuracies, label='Val Accuracy')
+ax2.set_xlabel('Epoch')
+ax2.set_ylabel('Accuracy')
+ax2.set_title('LR Training and Validation Accuracy')
+ax2.legend()
+
+plt.tight_layout()
+plt.savefig('linear_regression.png', dpi=150)
+plt.show()
+
+model.eval()
+all_preds, all_labels = [], []
+
+with torch.no_grad():
+    X_test_tensor = X_test_t.to(device)
+    outputs = model(X_test_tensor)
+    preds = outputs.argmax(1).cpu().numpy()
+
+all_preds = preds
+all_labels = y_test
+
+# Macro F1 and full report
+print("\n── Linear regression Test Results ──────────────────────────────")
+print(f"Macro F1 Score: {f1_score(all_labels, all_preds, average='macro'):.4f}")
+print("\nFull Classification Report:")
+print(classification_report(all_labels, all_preds, 
+                             target_names=l_encoder.classes_))
+
+# confusion matrix
+c_matrix = confusion_matrix(all_labels, all_preds)
+plt.figure(figsize=(7, 5))
+sns.heatmap(c_matrix, annot=True, fmt='d', 
+            xticklabels=l_encoder.classes_,
+            yticklabels=l_encoder.classes_,
+            cmap='BuPu')
+plt.xlabel('Predicted')
+plt.ylabel('Actual')
+plt.title('LR Confusion Matrix')
+plt.tight_layout()
+plt.savefig('LR_confusion_matrix.png', dpi=150)
+plt.show()
